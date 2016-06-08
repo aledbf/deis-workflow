@@ -138,39 +138,34 @@ RCD_TEMPLATE = """\
       },
       "spec": {
         "terminationGracePeriodSeconds": "$terminationGracePeriodSeconds",
-        "containers": [
-          {
-            "name": "$containername",
-            "image": "$image",
-            "imagePullPolicy": "$image_pull_policy",
-            "env": [
-            {
-                "name":"DEIS_APP",
-                "value":"$id"
+        "containers": [{
+          "name": "$containername",
+          "image": "$image",
+          "imagePullPolicy": "$image_pull_policy",
+          "env": [{
+            "name": "DEIS_APP",
+            "value": "$id"
+          }, {
+            "name": "WORKFLOW_RELEASE",
+            "value": "$appversion"
+          }],
+          "livenessProbe": {
+            "httpGet": {
+              "path": "/health-check",
+              "port": 5000
             },
-            {
-                "name":"WORKFLOW_RELEASE",
-                "value":"$appversion"
-            }
-            ],
-            "livenessProbe": {
-                "httpGet": {
-                    "path": "/health-check",
-                    "port": 5000
-                },
-                "initialDelaySeconds": 10,
-                "timeoutSeconds": 2
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 2
+          },
+          "readinessProbe": {
+            "httpGet": {
+              "path": "/health-check",
+              "port": 5000
             },
-            "readinessProbe": {
-                "httpGet": {
-                    "path": "/health-check",
-                    "port": 5000
-                },
-                "initialDelaySeconds": 10,
-                "timeoutSeconds": 2
-            }
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 2
           }
-        ],
+        }],
         "nodeSelector": {}
       }
     }
@@ -210,23 +205,34 @@ RCB_TEMPLATE = """\
       },
       "spec": {
         "terminationGracePeriodSeconds": "$terminationGracePeriodSeconds",
-        "containers": [
-          {
-            "name": "$containername",
-            "image": "$image",
-            "imagePullPolicy": "$image_pull_policy",
-            "env": [
-            {
-                "name":"DEIS_APP",
-                "value":"$id"
+        "containers": [{
+          "name": "$containername",
+          "image": "$image",
+          "imagePullPolicy": "$image_pull_policy",
+          "env": [{
+            "name": "DEIS_APP",
+            "value": "$id"
+          }, {
+            "name": "WORKFLOW_RELEASE",
+            "value": "$appversion"
+          }],
+          "livenessProbe": {
+            "httpGet": {
+              "path": "/health-check",
+              "port": 5000
             },
-            {
-                "name":"WORKFLOW_RELEASE",
-                "value":"$appversion"
-            }
-            ]
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 2
+          },
+          "readinessProbe": {
+            "httpGet": {
+              "path": "/health-check",
+              "port": 5000
+            },
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 2
           }
-        ],
+        }],
         "nodeSelector": {}
       }
     }
@@ -1048,9 +1054,6 @@ class KubeHTTPClient(object):
             "replicas": kwargs.get("replicas", 0),
             "containername": container_name,
             "type": app_type,
-            "storagetype": storageType,
-            "mHost": os.getenv("DEIS_MINIO_SERVICE_HOST"),
-            "mPort": os.getenv("DEIS_MINIO_SERVICE_PORT"),
             "terminationGracePeriodSeconds": settings.KUBERNETES_POD_TERMINATION_GRACE_PERIOD_SECONDS  # noqa
         }
 
