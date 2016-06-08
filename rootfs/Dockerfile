@@ -7,8 +7,6 @@ RUN adduser --system \
 	--group \
 	deis
 
-COPY . /app
-
 RUN buildDeps='gcc git libffi-dev libpq-dev python3-dev'; \
 	apt-get update && \
 	apt-get install -y --no-install-recommends \
@@ -23,6 +21,8 @@ RUN buildDeps='gcc git libffi-dev libpq-dev python3-dev'; \
 	apt-get purge -y --auto-remove $buildDeps && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc
+
+COPY . /app
 
 # define execution environment
 WORKDIR /app

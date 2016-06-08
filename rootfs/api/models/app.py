@@ -469,6 +469,8 @@ class App(UuidAuditedModel):
         if not kwargs.get('routable', False):
             return
 
+        return
+
         app_type = kwargs.get('app_type')
         self.log(
             'Waiting for router to be ready to serve traffic to process type {}'.format(app_type),

@@ -152,7 +152,23 @@ RCD_TEMPLATE = """\
                 "name":"WORKFLOW_RELEASE",
                 "value":"$appversion"
             }
-            ]
+            ],
+            "livenessProbe": {
+                "httpGet": {
+                    "path": "/health-check",
+                    "port": 5000
+                },
+                "initialDelaySeconds": 10,
+                "timeoutSeconds": 2
+            },
+            "readinessProbe": {
+                "httpGet": {
+                    "path": "/health-check",
+                    "port": 5000
+                },
+                "initialDelaySeconds": 10,
+                "timeoutSeconds": 2
+            }
           }
         ],
         "nodeSelector": {}
@@ -201,48 +217,17 @@ RCB_TEMPLATE = """\
             "imagePullPolicy": "$image_pull_policy",
             "env": [
             {
-                "name":"SLUG_URL",
-                "value":"$slug_url"
-            },
-            {
                 "name":"DEIS_APP",
                 "value":"$id"
             },
             {
                 "name":"WORKFLOW_RELEASE",
                 "value":"$appversion"
-            },
-            {
-                "name": "BUILDER_STORAGE",
-                "value":"$storagetype"
-            },
-            {
-                "name": "DEIS_MINIO_SERVICE_HOST",
-                "value":"$mHost"
-            },
-            {
-                "name": "DEIS_MINIO_SERVICE_PORT",
-                "value":"$mPort"
             }
-            ],
-            "volumeMounts":[
-              {
-                "name":"objectstorage-keyfile",
-                "mountPath":"/var/run/secrets/deis/objectstore/creds",
-                "readOnly":true
-              }
             ]
           }
         ],
-        "nodeSelector": {},
-        "volumes":[
-        {
-            "name":"objectstorage-keyfile",
-            "secret":{
-            "secretName":"objectstorage-keyfile"
-            }
-        }
-        ]
+        "nodeSelector": {}
       }
     }
   }
@@ -266,7 +251,7 @@ SERVICE_TEMPLATE = """\
       {
         "name": "http",
         "port": 80,
-        "targetPort": 8080,
+        "targetPort": 5000,
         "protocol": "TCP"
       }
     ],
@@ -452,8 +437,8 @@ class KubeHTTPClient(object):
             old_service = service.copy()  # in case anything fails for rollback
 
             # Update service information
-            if routable:
-                service['metadata']['labels']['router.deis.io/routable'] = 'true'
+            #if routable:
+            #    service['metadata']['labels']['router.deis.io/routable'] = 'true'
 
             # Set app type if there is not one available
             if 'type' not in service['spec']['selector']:
@@ -469,6 +454,7 @@ class KubeHTTPClient(object):
             self._update_service(namespace, namespace, data=service)
         except Exception as e:
             # Fix service to old port and app type
+            logger.exception("Update service error: {}".format(e))
             self._update_service(namespace, namespace, data=old_service)
             raise KubeException(str(e)) from e
 
@@ -549,7 +535,7 @@ class KubeHTTPClient(object):
             POD = POD_BTEMPLATE
             l["slug_url"] = image
             l['image_pull_policy'] = settings.SLUG_BUILDER_IMAGE_PULL_POLICY
-            l["image"] = settings.SLUGRUNNER_IMAGE
+            l["image"] = image
             l["mHost"] = os.getenv("DEIS_MINIO_SERVICE_HOST")
             l["mPort"] = os.getenv("DEIS_MINIO_SERVICE_PORT")
 
@@ -694,11 +680,6 @@ class KubeHTTPClient(object):
         if cpu:
             data["resources"]["limits"]["cpu"] = cpu
 
-        # add in healthchecks
-        if kwargs.get('healthcheck', None):
-            self._healthcheck(namespace, data, kwargs.get('routable'), **kwargs['healthcheck'])
-        else:
-            self._default_readiness_probe(data, kwargs.get('build_type'), env.get('PORT', None))
 
     def _set_image_secret(self, data, namespace, **kwargs):
         """
@@ -1084,10 +1065,11 @@ class KubeHTTPClient(object):
 
             l["slug_url"] = image
             l['image_pull_policy'] = settings.SLUG_BUILDER_IMAGE_PULL_POLICY
-            l["image"] = settings.SLUGRUNNER_IMAGE
+            l["image"] = image
             TEMPLATE = RCB_TEMPLATE
 
         template = json.loads(string.Template(TEMPLATE).substitute(l))
+        template["spec"]["imagePullSecrets"] = settings.IMAGE_PULL_SECRETS
         spec = template["spec"]["template"]["spec"]
 
         # apply tags as needed to restrict pod to particular node(s)
@@ -1149,128 +1131,6 @@ class KubeHTTPClient(object):
 
         return response
 
-    def _healthcheck(self, namespace, container, routable=False, path='/', port=5000,
-                     delay=30, timeout=5, period_seconds=1, success_threshold=1,
-                     failure_threshold=3):  # noqa
-        """
-        Apply HTTP GET healthcehck to the application container
-
-        http://kubernetes.io/docs/user-guide/walkthrough/k8s201/#health-checking
-        http://kubernetes.io/docs/user-guide/pod-states/#container-probes
-        http://kubernetes.io/docs/user-guide/liveness/
-        """
-        if not routable:
-            return
-
-        try:
-            service = self._get_service(namespace, namespace).json()
-            port = service['spec']['ports'][0]['targetPort']
-        except:
-            pass
-
-        # Only support HTTP checks for now
-        # http://kubernetes.io/docs/user-guide/pod-states/#container-probes
-        healthcheck = {
-            # defines the health checking
-            'livenessProbe': {
-                # an http probe
-                'httpGet': {
-                    'path': path,
-                    'port': int(port)
-                },
-                # length of time to wait for a pod to initialize
-                # after pod startup, before applying health checking
-                'initialDelaySeconds': delay,
-                'timeoutSeconds': timeout,
-                'periodSeconds': period_seconds,
-                'successThreshold': success_threshold,
-                'failureThreshold': failure_threshold,
-            },
-            'readinessProbe': {
-                # an http probe
-                'httpGet': {
-                    'path': path,
-                    'port': int(port)
-                },
-                # length of time to wait for a pod to initialize
-                # after pod startup, before applying health checking
-                'initialDelaySeconds': delay,
-                'timeoutSeconds': timeout,
-                'periodSeconds': period_seconds,
-                'successThreshold': success_threshold,
-                'failureThreshold': failure_threshold,
-            },
-        }
-
-        # Update only the application container with the health check
-        container.update(healthcheck)
-
-    def _default_readiness_probe(self, container, build_type, port=None):
-        # Update only the application container with the health check
-        if build_type == "buildpack":
-            container.update(self._default_buildpack_readiness_probe())
-        elif port:
-            container.update(self._default_dockerapp_readiness_probe(port))
-
-    '''
-    Applies exec readiness probe to the slugrunner container.
-    http://kubernetes.io/docs/user-guide/pod-states/#container-probes
-
-    /runner/init is the entry point of the slugrunner.
-    https://github.com/deis/slugrunner/blob/01eac53f1c5f1d1dfa7570bbd6b9e45c00441fea/rootfs/Dockerfile#L20
-    Once it downloads the slug it starts running using `exec` which means the pid 1
-    will point to the slug/application command instead of entry point once the application has
-    started.
-    https://github.com/deis/slugrunner/blob/01eac53f1c5f1d1dfa7570bbd6b9e45c00441fea/rootfs/runner/init#L90
-
-    This should be added only for the build pack apps when a custom liveness probe is not set to
-    make sure that the pod is ready only when the slug is downloaded and started running.
-    '''
-    def _default_buildpack_readiness_probe(self, delay=30, timeout=5, period_seconds=5,
-                                           success_threshold=1, failure_threshold=1):
-        readinessprobe = {
-            'readinessProbe': {
-                # an exec probe
-                'exec': {
-                    "command": [
-                        "bash",
-                        "-c",
-                        "[[ '$(ps -p 1 -o args)' != *'bash /runner/init'* ]]"
-                    ]
-                },
-                # length of time to wait for a pod to initialize
-                # after pod startup, before applying health checking
-                'initialDelaySeconds': delay,
-                'timeoutSeconds': timeout,
-                'periodSeconds': period_seconds,
-                'successThreshold': success_threshold,
-                'failureThreshold': failure_threshold,
-            },
-        }
-        return readinessprobe
-
-    '''
-    Applies tcp socket readiness probe to the docker app container only if some port is exposed
-    by the docker image.
-    '''
-    def _default_dockerapp_readiness_probe(self, port, delay=5, timeout=5, period_seconds=5,
-                                           success_threshold=1, failure_threshold=1):
-        readinessprobe = {
-            'readinessProbe': {
-                # an exec probe
-                'tcpSocket': {
-                    "port": int(port)
-                },
-                # length of time to wait for a pod to initialize
-                # after pod startup, before applying health checking
-                'initialDelaySeconds': delay,
-                'timeoutSeconds': timeout,
-                'periodSeconds': period_seconds,
-                'successThreshold': success_threshold,
-                'failureThreshold': failure_threshold,
-            },
-        }
-        return readinessprobe
 
     # SECRETS #
     # http://kubernetes.io/v1.1/docs/api-reference/v1/definitions.html#_v1_secret

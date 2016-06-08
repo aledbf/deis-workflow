@@ -5,7 +5,8 @@ from django.db import models
 
 from registry import publish_release, get_port as docker_get_port, RegistryException
 from api.utils import dict_diff
-from api.models import UuidAuditedModel, DeisException
+from api.models import UuidAuditedModel
+from api.exceptions import DeisException, AlreadyExists
 from scheduler import KubeHTTPException
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ class Release(UuidAuditedModel):
             self.build.image.startswith(settings.REGISTRY_HOST) or
             self.build.image.startswith(settings.REGISTRY_URL)
         ):
+
+            return self.build.image
             # strip registry information off first
             image = self.build.image.replace('{}/'.format(settings.REGISTRY_URL), '')
             return image.replace('{}/'.format(settings.REGISTRY_HOST), '')
@@ -66,7 +69,7 @@ class Release(UuidAuditedModel):
             return '{}/{}:v{}'.format(settings.REGISTRY_URL, self.app.id, str(self.version))
         elif self.build.type == 'buildpack':
             # Build Pack - Registry URL not prepended since slugrunner image will download slug
-            return self.build.image
+            return '{}/{}'.format(settings.REGISTRY_URL, self.build.image)
 
     def new(self, user, config, build, summary=None, source_version='latest'):
         """
@@ -263,6 +266,9 @@ class Release(UuidAuditedModel):
         controller_removal = []
         controllers = self._scheduler._get_rcs(self.app.id, labels=labels).json()
         for controller in controllers['items']:
+            if 'version' not in controller['metadata']['labels']:
+                continue
+                
             current_version = controller['metadata']['labels']['version']
             # skip the latest release
             if current_version == latest_version:
@@ -290,8 +296,13 @@ class Release(UuidAuditedModel):
         }
         secrets = self._scheduler._get_secrets(self.app.id, labels=labels).json()
         for secret in secrets['items']:
-            current_version = secret['metadata']['labels']['version']
-            # skip the latest release
+            # earlier iterations did not have version labels
+            if 'version' not in secret['metadata']['labels']:
+                current_version = 'v0'
+            else:
+                current_version = secret['metadata']['labels']['version']
+
+             # skip the latest release
             if current_version == latest_version:
                 continue
 
@@ -424,4 +435,7 @@ class Release(UuidAuditedModel):
                     self.summary = "{} created the initial release".format(self.owner)
                 else:
                     self.summary = "{} changed nothing".format(self.owner)
+                    # There were no changes to this release
+                    raise AlreadyExists("{} changed nothing - release stopped".format(self.owner))
+
         super(Release, self).save(*args, **kwargs)
