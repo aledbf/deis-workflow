@@ -87,7 +87,7 @@ class App(UuidAuditedModel):
                     # Namespace already exists
                     err = "{} already exists as a namespace in this kuberenetes setup".format(self.id)  # noqa
                     self.log(err, logging.INFO)
-                    raise AlreadyExists(err)
+                    #raise AlreadyExists(err)
             except KubeHTTPException:
                 pass
 
