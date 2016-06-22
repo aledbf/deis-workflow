@@ -110,12 +110,9 @@ class App(UuidAuditedModel):
 
     def _get_command(self, container_type):
         try:
-            # if this is not procfile-based app, ensure they cannot break out
-            # and run arbitrary commands on the host
-            # FIXME: remove slugrunner's hardcoded entrypoint
             release = self.release_set.latest()
             if release.build.dockerfile or not release.build.sha:
-                return "bash -c '{}'".format(release.build.procfile[container_type])
+                return release.build.procfile[container_type]
 
             return 'start {}'.format(container_type)
         # if the key is not present or if a parent attribute is None
@@ -124,20 +121,13 @@ class App(UuidAuditedModel):
             return '' if container_type == 'cmd' else 'start {}'.format(container_type)
 
     def _get_command_run(self, command):
-        # SECURITY: shell-escape user input
-        command = command.replace("'", "'\\''")
-
-        # if this is a procfile-based app, switch the entrypoint to slugrunner's default
-        # FIXME: remove slugrunner's hardcoded entrypoint
         release = self.release_set.latest()
         if release.build.procfile and \
            release.build.sha and not \
            release.build.dockerfile:
             entrypoint = '/runner/init'
-            command = "'{}'".format(command)
         else:
-            entrypoint = '/bin/bash'
-            command = "-c '{}'".format(command)
+            entrypoint = '/bin/bash -c'
 
         return entrypoint, command
 
